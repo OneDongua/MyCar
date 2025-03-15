@@ -32,7 +32,6 @@ void setMotor(int leftSpeed, int rightSpeed);
 float getDistance(int which);
 
 WiFiUDP udp;
-bool OAEnabled = false;
 
 void setup() {
   pinMode(MOTOR_A1, OUTPUT);
@@ -91,10 +90,6 @@ void loop() {
     Serial.print(leftSpeed);
     Serial.print(" | Right Speed: ");
     Serial.println(rightSpeed);
-
-    if (OAEnabled) {
-      
-    }
 
     setMotor(leftSpeed, rightSpeed);
   }
