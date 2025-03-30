@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <VL53L0X.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
@@ -16,6 +17,9 @@
 #define HC_TRIG_2 40  // 前 出
 #define HC_ECHO_2 21  // 前 入
 
+#define VL_SCL 13
+#define VL_SDA 14
+
 const char *ssid = "ChinaNet-GSLh";
 const char *password = "uhcxwszh";
 unsigned int localPort = 8888;  // 本地端口
@@ -32,6 +36,9 @@ void setMotor(int leftSpeed, int rightSpeed);
 float getDistance(int which);
 
 WiFiUDP udp;
+VL53L0X sensor;
+
+bool VLEnable = false;
 
 void setup() {
   pinMode(MOTOR_A1, OUTPUT);
@@ -64,8 +71,17 @@ void setup() {
   ledcAttachPin(MOTOR_B1, CH_RIGHT_REVERSE);
 
   Serial.begin(9600);
-  WiFi.begin(ssid, password);
+  Wire.begin(VL_SDA, VL_SCL);
 
+  if (sensor.init()) {
+    VLEnable = true;
+    sensor.setMeasurementTimingBudget(20000);  // 20ms
+    sensor.startContinuous();                  // 开始连续测量
+  } else {
+    Serial.println("VL53L0X initialization failed!");
+  }
+
+  WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     Serial.println("Connecting to WiFi...");
@@ -74,7 +90,7 @@ void setup() {
   Serial.println("Connected to WiFi!");
   udp.begin(localPort);  // 开始监听
 
-  Serial.println("v0.3");
+  Serial.println("v0.5");
 }
 
 void loop() {
@@ -90,6 +106,22 @@ void loop() {
     Serial.print(leftSpeed);
     Serial.print(" | Right Speed: ");
     Serial.println(rightSpeed);
+
+    if (VLEnable) {
+      int distance = sensor.readRangeContinuousMillimeters();
+      Serial.print("Distance: ");
+      Serial.print(distance);
+      Serial.println(" mm");
+
+      // 如果距离小于 400mm，阻止前进
+      if (distance < 400) {
+        if (leftSpeed > 0 && rightSpeed > 0) {
+          leftSpeed = 0;
+          rightSpeed = 0;
+        }
+        Serial.println("Blocked!");
+      }
+    }
 
     setMotor(leftSpeed, rightSpeed);
   }
