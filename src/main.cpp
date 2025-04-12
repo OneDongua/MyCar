@@ -12,13 +12,16 @@
 #define MOTOR_D1 9   // 左后 向后
 #define MOTOR_D2 8   // 左后 向前
 
-#define HC_TRIG_1 13  // 后 出
-#define HC_ECHO_1 14  // 后 入
-#define HC_TRIG_2 40  // 前 出
-#define HC_ECHO_2 21  // 前 入
+#define HC_TRIG_BACK 13   // 后 出
+#define HC_ECHO_BACK 14   // 后 入
+#define HC_TRIG_FRONT 40  // 前 出
+#define HC_ECHO_FRONT 21  // 前 入
 
-#define VL_SCL 13
-#define VL_SDA 14
+#define VL_SCL_FRONT 13
+#define VL_SDA_FRONT 14
+
+#define VL_SCL_BACK 6
+#define VL_SDA_BACK 5
 
 const char *ssid = "ChinaNet-GSLh";
 const char *password = "uhcxwszh";
@@ -36,11 +39,14 @@ void setMotor(int leftSpeed, int rightSpeed);
 float getDistance(int which);
 
 WiFiUDP udp;
-VL53L0X sensor;
+
+VL53L0X frontSensor;
+VL53L0X backSensor;
 
 bool VLEnable = false;
 
 void setup() {
+  // 此时 A 是 0x29，B 是 0x30
   pinMode(MOTOR_A1, OUTPUT);
   pinMode(MOTOR_A2, OUTPUT);
   pinMode(MOTOR_B1, OUTPUT);
@@ -50,10 +56,10 @@ void setup() {
   pinMode(MOTOR_D1, OUTPUT);
   pinMode(MOTOR_D2, OUTPUT);
 
-  pinMode(HC_TRIG_1, OUTPUT);
-  pinMode(HC_ECHO_1, INPUT);
-  pinMode(HC_TRIG_2, OUTPUT);
-  pinMode(HC_ECHO_2, INPUT);
+  pinMode(HC_TRIG_BACK, OUTPUT);
+  pinMode(HC_ECHO_BACK, INPUT);
+  pinMode(HC_TRIG_FRONT, OUTPUT);
+  pinMode(HC_ECHO_FRONT, INPUT);
 
   // 设置 PWM
   ledcSetup(CH_LEFT, PWM_FREQ, PWM_RESOLUTION);
@@ -71,14 +77,27 @@ void setup() {
   ledcAttachPin(MOTOR_B1, CH_RIGHT_REVERSE);
 
   Serial.begin(9600);
-  Wire.begin(VL_SDA, VL_SCL);
 
-  if (sensor.init()) {
+  Wire.begin(VL_SDA_FRONT, VL_SCL_FRONT);
+  frontSensor.setBus(&Wire);
+  if (frontSensor.init()) {
     VLEnable = true;
-    sensor.setMeasurementTimingBudget(20000);  // 20ms
-    sensor.startContinuous();                  // 开始连续测量
+    frontSensor.setMeasurementTimingBudget(20000);  // 20ms
+    frontSensor.startContinuous();                  // 开始连续测量
   } else {
-    Serial.println("VL53L0X initialization failed!");
+    VLEnable = false;
+    Serial.println("Front VL53L0X initialization failed!");
+  }
+
+  Wire1.begin(VL_SDA_BACK, VL_SCL_BACK);
+  backSensor.setBus(&Wire1);
+  if (backSensor.init()) {
+    VLEnable = true;
+    backSensor.setMeasurementTimingBudget(20000);  // 20ms
+    backSensor.startContinuous();                  // 开始连续测量
+  } else {
+    VLEnable = false;
+    Serial.println("Back VL53L0X initialization failed!");
   }
 
   WiFi.begin(ssid, password);
@@ -108,18 +127,30 @@ void loop() {
     Serial.println(rightSpeed);
 
     if (VLEnable) {
-      int distance = sensor.readRangeContinuousMillimeters();
-      Serial.print("Distance: ");
-      Serial.print(distance);
+      int frontDistance = frontSensor.readRangeContinuousMillimeters();
+      Serial.print("Front distance: ");
+      Serial.print(frontDistance);
       Serial.println(" mm");
 
-      // 如果距离小于 400mm，阻止前进
-      if (distance < 400) {
+      int backDistance = backSensor.readRangeContinuousMillimeters();
+      Serial.print("Back distance: ");
+      Serial.print(backDistance);
+      Serial.println(" mm");
+
+      if (frontDistance < 300) {
         if (leftSpeed > 0 && rightSpeed > 0) {
           leftSpeed = 0;
           rightSpeed = 0;
         }
-        Serial.println("Blocked!");
+        Serial.println("Forward blocked!");
+      }
+
+      if (backDistance < 300) {
+        if (leftSpeed < 0 && rightSpeed < 0) {
+          leftSpeed = 0;
+          rightSpeed = 0;
+        }
+        Serial.println("Back blocked!");
       }
     }
 
@@ -174,8 +205,8 @@ void setMotor(int leftSpeed, int rightSpeed) {
 }
 
 float getDistance(int which) {
-  int TRIG_PIN = which == 1 ? HC_TRIG_1 : HC_TRIG_2;
-  int ECHO_PIN = which == 1 ? HC_ECHO_1 : HC_ECHO_2;
+  int TRIG_PIN = which == 1 ? HC_TRIG_BACK : HC_TRIG_FRONT;
+  int ECHO_PIN = which == 1 ? HC_ECHO_BACK : HC_ECHO_FRONT;
 
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
