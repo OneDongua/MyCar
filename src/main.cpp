@@ -12,11 +12,6 @@
 #define MOTOR_D1 9   // 左后 向后
 #define MOTOR_D2 8   // 左后 向前
 
-#define HC_TRIG_BACK 13   // 后 出
-#define HC_ECHO_BACK 14   // 后 入
-#define HC_TRIG_FRONT 40  // 前 出
-#define HC_ECHO_FRONT 21  // 前 入
-
 #define VL_SCL_FRONT 13
 #define VL_SDA_FRONT 14
 
@@ -36,14 +31,14 @@ const int CH_RIGHT = 2;          // 右电机 PWM 通道
 const int CH_RIGHT_REVERSE = 3;  // 右电机 PWM 反向通道
 
 void setMotor(int leftSpeed, int rightSpeed);
-float getDistance(int which);
 
 WiFiUDP udp;
 
 VL53L0X frontSensor;
 VL53L0X backSensor;
 
-bool VLEnable = false;
+bool VLinited = false;
+bool OAEnable = false;
 
 void setup() {
   // 此时 A 是 0x29，B 是 0x30
@@ -55,11 +50,6 @@ void setup() {
   pinMode(MOTOR_C2, OUTPUT);
   pinMode(MOTOR_D1, OUTPUT);
   pinMode(MOTOR_D2, OUTPUT);
-
-  pinMode(HC_TRIG_BACK, OUTPUT);
-  pinMode(HC_ECHO_BACK, INPUT);
-  pinMode(HC_TRIG_FRONT, OUTPUT);
-  pinMode(HC_ECHO_FRONT, INPUT);
 
   // 设置 PWM
   ledcSetup(CH_LEFT, PWM_FREQ, PWM_RESOLUTION);
@@ -81,22 +71,26 @@ void setup() {
   Wire.begin(VL_SDA_FRONT, VL_SCL_FRONT);
   frontSensor.setBus(&Wire);
   if (frontSensor.init()) {
-    VLEnable = true;
+    VLinited = true;
+    OAEnable = true;
     frontSensor.setMeasurementTimingBudget(20000);  // 20ms
     frontSensor.startContinuous();                  // 开始连续测量
   } else {
-    VLEnable = false;
+    VLinited = false;
+    OAEnable = false;
     Serial.println("Front VL53L0X initialization failed!");
   }
 
   Wire1.begin(VL_SDA_BACK, VL_SCL_BACK);
   backSensor.setBus(&Wire1);
   if (backSensor.init()) {
-    VLEnable = true;
+    VLinited = true;
+    OAEnable = true;
     backSensor.setMeasurementTimingBudget(20000);  // 20ms
     backSensor.startContinuous();                  // 开始连续测量
   } else {
-    VLEnable = false;
+    VLinited = false;
+    OAEnable = false;
     Serial.println("Back VL53L0X initialization failed!");
   }
 
@@ -107,54 +101,71 @@ void setup() {
   }
 
   Serial.println("Connected to WiFi!");
+  Serial.print("WiFi IP address: ");
+  Serial.println(WiFi.localIP());
   udp.begin(localPort);  // 开始监听
-
-  Serial.println("v0.5");
 }
 
 void loop() {
   byte packetBuffer[2];
   int packetSize = udp.parsePacket();
-  if (packetSize == 2) {
-    udp.read(packetBuffer, 2);
 
-    int leftSpeed = (int8_t)packetBuffer[0];
-    int rightSpeed = (int8_t)packetBuffer[1];
+  if (packetSize > 0) {  // 检查是否有数据包到达
+    int len = udp.read(packetBuffer, sizeof(packetBuffer));
 
-    Serial.print("Left Speed: ");
-    Serial.print(leftSpeed);
-    Serial.print(" | Right Speed: ");
-    Serial.println(rightSpeed);
+    if (len == 1) {  // 单字节指令，用于切换 OAEnable
+      if (!VLinited) {
+        Serial.println("VL53L0X not initialized!");
+        return;
+      }
+      if (packetBuffer[0] == 0x00) {
+        OAEnable = false;
+        Serial.println("OA: OFF");
+      } else if (packetBuffer[0] == 0x01) {
+        OAEnable = true;
+        Serial.println("OA: ON");
+      }
+    } else if (len == 2) {
+      udp.read(packetBuffer, 2);
 
-    if (VLEnable) {
-      int frontDistance = frontSensor.readRangeContinuousMillimeters();
-      Serial.print("Front distance: ");
-      Serial.print(frontDistance);
-      Serial.println(" mm");
+      int leftSpeed = (int8_t)packetBuffer[0];
+      int rightSpeed = (int8_t)packetBuffer[1];
 
-      int backDistance = backSensor.readRangeContinuousMillimeters();
-      Serial.print("Back distance: ");
-      Serial.print(backDistance);
-      Serial.println(" mm");
+      Serial.print("Left Speed: ");
+      Serial.print(leftSpeed);
+      Serial.print(" | Right Speed: ");
+      Serial.println(rightSpeed);
 
-      if (frontDistance < 300) {
-        if (leftSpeed > 0 && rightSpeed > 0) {
-          leftSpeed = 0;
-          rightSpeed = 0;
+      if (OAEnable) {
+        int frontDistance = frontSensor.readRangeContinuousMillimeters();
+        Serial.print("Front distance: ");
+        Serial.print(frontDistance);
+        Serial.println(" mm");
+
+        int backDistance = backSensor.readRangeContinuousMillimeters();
+        Serial.print("Back distance: ");
+        Serial.print(backDistance);
+        Serial.println(" mm");
+
+        if (frontDistance < 300) {
+          if (leftSpeed > 0 && rightSpeed > 0) {
+            leftSpeed = 0;
+            rightSpeed = 0;
+          }
+          Serial.println("Forward blocked!");
         }
-        Serial.println("Forward blocked!");
+
+        if (backDistance < 300) {
+          if (leftSpeed < 0 && rightSpeed < 0) {
+            leftSpeed = 0;
+            rightSpeed = 0;
+          }
+          Serial.println("Back blocked!");
+        }
       }
 
-      if (backDistance < 300) {
-        if (leftSpeed < 0 && rightSpeed < 0) {
-          leftSpeed = 0;
-          rightSpeed = 0;
-        }
-        Serial.println("Back blocked!");
-      }
+      setMotor(leftSpeed, rightSpeed);
     }
-
-    setMotor(leftSpeed, rightSpeed);
   }
   delay(32);
   setMotor(0, 0);
@@ -202,19 +213,4 @@ void setMotor(int leftSpeed, int rightSpeed) {
     ledcWrite(CH_RIGHT, 0);
     ledcWrite(CH_RIGHT_REVERSE, -rightSpeed);
   }
-}
-
-float getDistance(int which) {
-  int TRIG_PIN = which == 1 ? HC_TRIG_BACK : HC_TRIG_FRONT;
-  int ECHO_PIN = which == 1 ? HC_ECHO_BACK : HC_ECHO_FRONT;
-
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000);  // 读取回波时间 (微秒)
-  float distance = duration * 0.034 / 2;           // 计算距离 (cm)
-  return distance;
 }
