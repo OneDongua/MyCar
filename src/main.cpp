@@ -2,6 +2,7 @@
 #include <VL53L0X.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <HTTPClient.h>
 
 #define MOTOR_A1 41  // 右后 向后
 #define MOTOR_A2 15  // 右后 向前
@@ -21,6 +22,8 @@
 const char *ssid = "ChinaNet-GSLh";
 const char *password = "uhcxwszh";
 unsigned int localPort = 8888;  // 本地端口
+const char *apiUrl = "https://car.131920.xyz/api";
+const char *carId = "car1";
 
 // PWM 频率 & 通道
 const int PWM_FREQ = 1000;       // PWM 频率 1kHz
@@ -103,6 +106,33 @@ void setup() {
   Serial.println("Connected to WiFi!");
   Serial.print("WiFi IP address: ");
   Serial.println(WiFi.localIP());
+  
+  // 发送初始化 POST 请求
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(apiUrl);
+    http.addHeader("Content-Type", "application/json");
+    
+    String jsonPayload = "{\"id\":\"" + String(carId) + "\",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
+    Serial.print("Sending JSON: ");
+    Serial.println(jsonPayload);
+    
+    int httpResponseCode = http.POST(jsonPayload);
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+    
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.print("Response: ");
+      Serial.println(response);
+    } else {
+      Serial.print("HTTP Error: ");
+      Serial.println(http.errorToString(httpResponseCode));
+    }
+    
+    http.end();
+  }
+  
   udp.begin(localPort);  // 开始监听
 }
 
